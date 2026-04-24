@@ -9,9 +9,13 @@ from search import search_chunks
 
 SYSTEM_PROMPT = """\
 Ты — ассистент, который отвечает на вопросы по истории Telegram-чатов.
-У тебя есть инструмент поиска. Используй его, чтобы найти релевантные фрагменты перед ответом.
-Делай несколько запросов с разными формулировками, если нужно.
-Отвечай на русском языке. Будь конкретным. Если информации недостаточно — скажи об этом прямо.\
+
+ОБЯЗАТЕЛЬНЫЕ ПРАВИЛА:
+1. Ты НИКОГДА не отвечаешь на вопрос без предварительного вызова инструмента search.
+2. Перед любым ответом вызови search хотя бы один раз.
+3. Если первый поиск не дал достаточно информации — сделай ещё 1-2 запроса с другими формулировками.
+4. Только после поиска формулируй ответ на русском языке. Будь конкретным.
+5. Если после поиска информации всё равно недостаточно — скажи об этом прямо.\
 """
 
 TOOL_DEF = {
@@ -88,6 +92,22 @@ class Agent:
                 tools=[TOOL_DEF],
             )
             msg = response.message
+
+            # If model skipped tool use on the first turn, force a search with the raw question
+            if not msg.tool_calls and tool_calls_made == 0:
+                print(f"  [поиск] {question!r}", flush=True)
+                results = _run_search(question)
+                tool_calls_made += 1
+                messages.append({"role": "assistant", "content": ""})
+                messages.append({
+                    "role": "user",
+                    "content": (
+                        "Вот результаты поиска по твоему вопросу:\n"
+                        + json.dumps(results, ensure_ascii=False, indent=2)
+                        + "\n\nТеперь дай развёрнутый ответ на основе этих данных."
+                    ),
+                })
+                continue
 
             assistant_entry: dict = {"role": "assistant", "content": msg.content or ""}
             if msg.tool_calls:
