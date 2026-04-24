@@ -92,6 +92,7 @@ class Agent:
                 model=self.model,
                 messages=messages,
                 tools=[TOOL_DEF],
+                options={"temperature": 0.1},
             )
             msg = response.message
 
@@ -146,7 +147,7 @@ class Agent:
             "role": "user",
             "content": "Подведи итог на основе найденной информации.",
         })
-        response = self.client.chat(model=self.model, messages=messages)
+        response = self.client.chat(model=self.model, messages=messages, options={"temperature": 0.1})
         return response.message.content or ""
 
     def _fallback_chat(self, question: str) -> str:
@@ -163,7 +164,7 @@ class Agent:
                 ),
             },
         ]
-        response = self.client.chat(model=self.model, messages=messages)
+        response = self.client.chat(model=self.model, messages=messages, options={"temperature": 0.1})
         raw = response.message.content or ""
 
         try:
@@ -184,5 +185,5 @@ class Agent:
             {"role": "assistant", "content": f"Найденные фрагменты:\n{context}"},
             {"role": "user", "content": "Дай развёрнутый ответ на основе найденной информации."},
         ]
-        response = self.client.chat(model=self.model, messages=messages)
+        response = self.client.chat(model=self.model, messages=messages, options={"temperature": 0.1})
         return response.message.content or ""
