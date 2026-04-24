@@ -1,0 +1,28 @@
+[project]
+name = "tg-rag"
+version = "0.1.0"
+requires-python = ">=3.11"
+dependencies = [
+    "telethon>=1.36.0",
+    "sentence-transformers>=3.3.0",
+    "qdrant-client>=1.9.0",
+    "python-dotenv>=1.0.0",
+    "torch>=2.3.0",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.uv]
+package = false
+
+# CPU-only PyTorch wheel — MPS acceleration works on top of this on Apple Silicon.
+# Never use the default PyPI torch (pulls CUDA) or the cu* variants.
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true
+
+[tool.uv.sources]
+torch = { index = "pytorch-cpu" }
