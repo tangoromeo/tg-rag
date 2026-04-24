@@ -1,5 +1,6 @@
 import json
 import sqlite3
+from datetime import datetime
 from pathlib import Path
 
 import ollama
@@ -60,7 +61,7 @@ def _run_search(query: str) -> list[dict]:
         {
             "text": r["text"],
             "chat_name": _chat_title(r["chat_id"]),
-            "ts_start": r["ts_start"],
+            "date": datetime.fromtimestamp(r["ts_start"]).strftime("%Y-%m-%d"),
             "score": round(r["score"], 4),
         }
         for r in results
