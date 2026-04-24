@@ -53,13 +53,13 @@ def run_search(
 
     search_filter = Filter(must=conditions) if conditions else None
 
-    candidates = client.search(
+    candidates = client.query_points(
         collection_name=config.COLLECTION_NAME,
-        query_vector=vec,
+        query=vec,
         limit=VECTOR_CANDIDATES,
         query_filter=search_filter,
         with_payload=True,
-    )
+    ).points
 
     if not candidates:
         print("Результатов не найдено.")

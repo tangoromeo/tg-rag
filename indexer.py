@@ -106,43 +106,41 @@ def run_indexer() -> None:
             continue
 
         print(f"  Новых чанков: {len(new_chunks)}")
-        texts = ["passage: " + c["text"] for _, c in new_chunks]
 
         batch_size = 64
-        all_embeddings = []
-        for i in range(0, len(texts), batch_size):
-            batch = texts[i : i + batch_size]
-            vecs = model.encode(batch, show_progress_bar=False, normalize_embeddings=True)
-            all_embeddings.extend(vecs)
-            done = min(i + batch_size, len(texts))
-            print(f"  Эмбеддинги: {done}/{len(texts)}", flush=True)
+        for i in range(0, len(new_chunks), batch_size):
+            batch = new_chunks[i : i + batch_size]
+            texts = ["passage: " + c["text"] for _, c in batch]
+            vecs = model.encode(texts, show_progress_bar=False, normalize_embeddings=True)
 
-        points = [
-            PointStruct(
-                id=point_id,
-                vector=vec.tolist(),
-                payload={
-                    "chat_id": chunk["chat_id"],
-                    "ts_start": chunk["ts_start"],
-                    "ts_end": chunk["ts_end"],
-                    "message_ids": chunk["message_ids"],
-                    "authors": chunk["authors"],
-                    "text": chunk["text"],
-                },
-            )
-            for (point_id, chunk), vec in zip(new_chunks, all_embeddings)
-        ]
+            points = [
+                PointStruct(
+                    id=point_id,
+                    vector=vec.tolist(),
+                    payload={
+                        "chat_id": chunk["chat_id"],
+                        "ts_start": chunk["ts_start"],
+                        "ts_end": chunk["ts_end"],
+                        "message_ids": chunk["message_ids"],
+                        "authors": chunk["authors"],
+                        "text": chunk["text"],
+                    },
+                )
+                for (point_id, chunk), vec in zip(batch, vecs)
+            ]
 
-        client.upsert(collection_name=config.COLLECTION_NAME, points=points)
+            client.upsert(collection_name=config.COLLECTION_NAME, points=points)
 
-        for point_id, chunk in new_chunks:
-            conn.execute(
-                "INSERT OR REPLACE INTO indexed_chunks (point_id, chat_id, message_ids) VALUES (?, ?, ?)",
-                (point_id, chunk["chat_id"], json.dumps(chunk["message_ids"])),
-            )
-        conn.commit()
-        total_indexed += len(points)
-        print(f"  Проиндексировано: {len(points)} чанков.")
+            for point_id, chunk in batch:
+                conn.execute(
+                    "INSERT OR REPLACE INTO indexed_chunks (point_id, chat_id, message_ids) VALUES (?, ?, ?)",
+                    (point_id, chunk["chat_id"], json.dumps(chunk["message_ids"])),
+                )
+            conn.commit()
+
+            done = min(i + batch_size, len(new_chunks))
+            total_indexed += len(points)
+            print(f"  Проиндексировано: {done}/{len(new_chunks)}", flush=True)
 
     print(f"\nИндексация завершена. Всего проиндексировано: {total_indexed} чанков.")
 
