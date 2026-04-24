@@ -109,20 +109,10 @@ class Agent:
                 })
                 continue
 
-            assistant_entry: dict = {"role": "assistant", "content": msg.content or ""}
-            if msg.tool_calls:
-                assistant_entry["tool_calls"] = [
-                    {
-                        "function": {
-                            "name": tc.function.name,
-                            "arguments": json.dumps(tc.function.arguments, ensure_ascii=False)
-                            if isinstance(tc.function.arguments, dict)
-                            else tc.function.arguments,
-                        }
-                    }
-                    for tc in msg.tool_calls
-                ]
-            messages.append(assistant_entry)
+            # Don't echo tool_calls back into history — Ollama SDK serializes
+            # arguments inconsistently across versions (dict vs JSON string).
+            # Inject results as a user message instead; model handles it fine.
+            messages.append({"role": "assistant", "content": msg.content or ""})
 
             if not msg.tool_calls:
                 return msg.content or ""
@@ -130,13 +120,23 @@ class Agent:
             for tc in msg.tool_calls:
                 if tc.function.name != "search":
                     continue
-                query = tc.function.arguments.get("query", "")
+                args = tc.function.arguments
+                if isinstance(args, str):
+                    try:
+                        args = json.loads(args)
+                    except json.JSONDecodeError:
+                        args = {}
+                query = args.get("query", "") if isinstance(args, dict) else ""
                 print(f"  [поиск] {query!r}", flush=True)
                 results = _run_search(query)
                 tool_calls_made += 1
                 messages.append({
-                    "role": "tool",
-                    "content": json.dumps(results, ensure_ascii=False),
+                    "role": "user",
+                    "content": (
+                        f"Результаты поиска по «{query}»:\n"
+                        + json.dumps(results, ensure_ascii=False, indent=2)
+                        + "\n\nЕсли нужно — сделай ещё запросы, иначе дай ответ."
+                    ),
                 })
 
         # Max tool calls reached — force synthesis
