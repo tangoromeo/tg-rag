@@ -64,7 +64,7 @@ def _run_search(query: str) -> list[dict]:
 
 class Agent:
     def __init__(self) -> None:
-        self.client = ollama.Client(host=config.OLLAMA_HOST)
+        self.client = ollama.Client(host=config.OLLAMA_HOST, timeout=120.0)
         self.model = config.OLLAMA_MODEL
 
     def chat(self, question: str) -> str:
@@ -92,7 +92,14 @@ class Agent:
             assistant_entry: dict = {"role": "assistant", "content": msg.content or ""}
             if msg.tool_calls:
                 assistant_entry["tool_calls"] = [
-                    {"function": {"name": tc.function.name, "arguments": tc.function.arguments}}
+                    {
+                        "function": {
+                            "name": tc.function.name,
+                            "arguments": json.dumps(tc.function.arguments, ensure_ascii=False)
+                            if isinstance(tc.function.arguments, dict)
+                            else tc.function.arguments,
+                        }
+                    }
                     for tc in msg.tool_calls
                 ]
             messages.append(assistant_entry)
