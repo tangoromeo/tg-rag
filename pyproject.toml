@@ -8,6 +8,7 @@ dependencies = [
     "qdrant-client>=1.9.0",
     "python-dotenv>=1.0.0",
     "torch>=2.3.0",
+    "ollama>=0.3.0",
 ]
 
 [build-system]

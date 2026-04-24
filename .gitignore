@@ -1,0 +1,10 @@
+.env
+data/
+session.session
+session.session-journal
+__pycache__/
+*.py[cod]
+.venv/
+*.egg-info/
+dist/
+*.lock
