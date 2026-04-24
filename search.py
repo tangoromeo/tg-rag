@@ -1,3 +1,4 @@
+import math
 import sqlite3
 import sys
 import time
@@ -14,6 +15,15 @@ from reranker import Reranker
 
 DB_PATH = Path(config.DB_PATH)
 VECTOR_CANDIDATES = 20
+
+
+def _sigmoid(x: float) -> float:
+    return 1.0 / (1.0 + math.exp(-x))
+
+
+def _time_decay(ts_start: int) -> float:
+    age_days = (time.time() - ts_start) / 86400
+    return math.exp(-math.log(2) * max(age_days, 0) / config.DECAY_HALF_LIFE_DAYS)
 
 # Lazy singletons — loaded once, reused across calls (including by agent.py)
 _model: SentenceTransformer | None = None
@@ -55,37 +65,61 @@ def resolve_chat_id(chat_arg: str) -> str:
     return row[0] if row else chat_arg
 
 
+def _fetch(vec: list, conditions: list, limit: int) -> list:
+    f = Filter(must=conditions) if conditions else None
+    return _get_qdrant().query_points(
+        collection_name=config.COLLECTION_NAME,
+        query=vec,
+        limit=limit,
+        query_filter=f,
+        with_payload=True,
+    ).points
+
+
 def search_chunks(
     query: str,
     chat_arg: str | None = None,
     days: int | None = None,
     top_k: int = 5,
 ) -> list[dict]:
-    """Embed → Qdrant top-20 → rerank top-k. Returns list of result dicts."""
+    """Dual retrieval (all-time + recent) → rerank → time decay → top-k."""
     vec = _get_model().encode(["query: " + query], normalize_embeddings=True)[0].tolist()
 
-    conditions = []
+    base: list = []
     if chat_arg:
-        chat_id = resolve_chat_id(chat_arg)
-        conditions.append(FieldCondition(key="chat_id", match=MatchValue(value=chat_id)))
+        base.append(FieldCondition(key="chat_id", match=MatchValue(value=resolve_chat_id(chat_arg))))
+
     if days:
+        # Explicit time window: single query, no dual retrieval
         ts_min = int(time.time()) - days * 86400
-        conditions.append(FieldCondition(key="ts_start", range=Range(gte=ts_min)))
+        candidates = _fetch(vec, base + [FieldCondition(key="ts_start", range=Range(gte=ts_min))], VECTOR_CANDIDATES)
+    else:
+        # All-time semantic candidates
+        all_time = _fetch(vec, base, VECTOR_CANDIDATES)
 
-    search_filter = Filter(must=conditions) if conditions else None
+        # Recent candidates guaranteed in pool regardless of semantic score
+        ts_min = int(time.time()) - config.RECENT_DAYS * 86400
+        recent = _fetch(vec, base + [FieldCondition(key="ts_start", range=Range(gte=ts_min))], config.RECENT_CANDIDATES)
 
-    candidates = _get_qdrant().query_points(
-        collection_name=config.COLLECTION_NAME,
-        query=vec,
-        limit=VECTOR_CANDIDATES,
-        query_filter=search_filter,
-        with_payload=True,
-    ).points
+        # Merge, dedup by point id
+        seen: set = set()
+        candidates = []
+        for hit in list(all_time) + list(recent):
+            if hit.id not in seen:
+                seen.add(hit.id)
+                candidates.append(hit)
 
     if not candidates:
         return []
 
-    ranked = _get_reranker().rerank(query, candidates, top_k=top_k)
+    # Score all candidates, then apply sigmoid + time decay before taking top-k
+    ranked = _get_reranker().rerank(query, candidates, top_k=len(candidates))
+    decayed = [
+        (_sigmoid(score) * _time_decay(hit.payload.get("ts_start", 0)), hit)
+        for score, hit in ranked
+    ]
+    decayed.sort(key=lambda x: x[0], reverse=True)
+
     return [
         {
             "score": float(score),
@@ -94,7 +128,7 @@ def search_chunks(
             "ts_start": hit.payload.get("ts_start", 0),
             "authors": hit.payload.get("authors", []),
         }
-        for score, hit in ranked
+        for score, hit in decayed[:top_k]
     ]
 
 
