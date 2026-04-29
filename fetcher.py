@@ -1,13 +1,15 @@
 import asyncio
 import json
+import re
 import sqlite3
 import sys
 from argparse import ArgumentParser
 from pathlib import Path
 
 from telethon import TelegramClient
-from telethon.errors import FloodWaitError
-from telethon.tl.types import Message
+from telethon.errors import FloodWaitError, UserAlreadyParticipantError
+from telethon.tl.functions.messages import CheckChatInviteRequest, ImportChatInviteRequest
+from telethon.tl.types import ChatInviteAlready, Message
 
 import config
 
@@ -39,8 +41,30 @@ def get_conn() -> sqlite3.Connection:
     return conn
 
 
+_INVITE_RE = re.compile(r"https?://t\.me/(?:joinchat/|\+)([A-Za-z0-9_-]+)")
+
+
 def _build_client() -> TelegramClient:
     return TelegramClient("session", config.TG_API_ID, config.TG_API_HASH)
+
+
+async def _get_entity(client: TelegramClient, chat_arg: str):
+    m = _INVITE_RE.match(chat_arg)
+    if not m:
+        return await client.get_entity(chat_arg)
+
+    invite_hash = m.group(1)
+    try:
+        result = await client(CheckChatInviteRequest(invite_hash))
+        if isinstance(result, ChatInviteAlready):
+            return result.chat
+        # Not a member yet — join
+        joined = await client(ImportChatInviteRequest(invite_hash))
+        return joined.chats[0]
+    except UserAlreadyParticipantError:
+        # Edge case: already a member but CheckChatInvite returned otherwise
+        result = await client(CheckChatInviteRequest(invite_hash))
+        return result.chat
 
 
 async def _resolve_sender(msg: Message, cache: dict[str, str]) -> tuple[str, str]:
@@ -148,7 +172,7 @@ async def fetch_chat(chat_id_or_username: str, limit: int | None = None) -> None
     conn = get_conn()
     async with _build_client() as client:
         await client.start(phone=config.TG_PHONE)
-        entity = await client.get_entity(chat_id_or_username)
+        entity = await _get_entity(client, chat_id_or_username)
         chat_id = str(entity.id)
         _save_chat(conn, chat_id, entity)
 
@@ -168,7 +192,7 @@ async def fetch_new(chat_id_or_username: str) -> None:
     conn = get_conn()
     async with _build_client() as client:
         await client.start(phone=config.TG_PHONE)
-        entity = await client.get_entity(chat_id_or_username)
+        entity = await _get_entity(client, chat_id_or_username)
         chat_id = str(entity.id)
         _save_chat(conn, chat_id, entity)
 
@@ -192,7 +216,7 @@ async def fetch_new(chat_id_or_username: str) -> None:
 
 def main() -> None:
     parser = ArgumentParser(description="Загрузка истории Telegram-чата")
-    parser.add_argument("chat", help="username или id чата")
+    parser.add_argument("chat", help="username, id чата или ссылка-приглашение (https://t.me/+hash)")
     parser.add_argument("--new", action="store_true", help="только новые сообщения")
     parser.add_argument("--limit", type=int, default=None, help="максимум сообщений")
     args = parser.parse_args()
